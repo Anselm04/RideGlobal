@@ -46,6 +46,25 @@
   <div id="lbList">Loading...</div>
 </div>
 <div id="finishOverlay"></div>
+<div id="authOverlay" style="position:absolute; inset:0; background:rgba(5,10,20,0.95); z-index:40; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center;">
+  <h1 style="margin-bottom:6px;">RideGlobal</h1>
+  <p style="opacity:0.8; margin-bottom:16px; max-width:320px;">Sign up or log in to save your runs to a persistent profile — or just play as a guest.</p>
+  <input id="authEmail" type="email" placeholder="email" style="margin-bottom:8px; padding:8px; width:220px; border-radius:6px; border:1px solid #444;" />
+  <input id="authPassword" type="password" placeholder="password (min 6 chars)" style="margin-bottom:12px; padding:8px; width:220px; border-radius:6px; border:1px solid #444;" />
+  <div style="display:flex; gap:10px; margin-bottom:14px;">
+    <button id="authSignUpBtn" class="abtn">Sign Up</button>
+    <button id="authLogInBtn" class="abtn">Log In</button>
+  </div>
+  <button id="authGuestBtn" style="background:none; border:none; color:#4fd1ff; text-decoration:underline; cursor:pointer;">Play as Guest instead</button>
+  <div id="authMsg" style="margin-top:10px; font-size:13px; opacity:0.85; max-width:300px;"></div>
+</div>
+<style>
+  .abtn {
+    padding: 10px 18px; border-radius: 8px; border: 2px solid #4fd1ff;
+    background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; font-size: 14px;
+  }
+  .abtn:hover { background: rgba(79,209,255,0.25); }
+</style>
 <div id="vehicleSelect" style="position:absolute; inset:0; background:rgba(5,10,20,0.9); z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center;">
   <h1 style="margin-bottom:6px;">RideGlobal</h1>
   <p style="opacity:0.8; margin-bottom:24px;">Pick your ride to prove the multi-discipline world</p>
@@ -106,7 +125,7 @@ async function sbFetch(path, options = {}) {
 async function loadLeaderboard() {
   try {
     const rows = await sbFetch(
-      "rideglobal_runs?select=time_ms,trick_score,track_id,rideglobal_players(display_name)&order=time_ms.asc&limit=10"
+      "rideglobal_runs?select=time_ms,trick_score,track_id,rideglobal_players(display_name),rideglobal_profiles(display_name)&order=time_ms.asc&limit=10"
     );
     const list = document.getElementById('lbList');
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -114,7 +133,9 @@ async function loadLeaderboard() {
       return;
     }
     list.innerHTML = rows.map((r, i) => {
-      const name = (r.rideglobal_players && r.rideglobal_players.display_name) || "Anonymous";
+      const name = (r.rideglobal_profiles && r.rideglobal_profiles.display_name)
+        || (r.rideglobal_players && r.rideglobal_players.display_name)
+        || "Anonymous";
       return (i + 1) + ". " + name + " — " + (r.time_ms / 1000).toFixed(2) + "s (" + (r.trick_score || 0) + " pts)";
     }).join("<br/>");
   } catch (e) {
@@ -135,17 +156,97 @@ async function findOrCreatePlayer(name) {
   return Array.isArray(created) && created[0] ? created[0].id : null;
 }
 
+let authAccessToken = null;
+let authUserId = null;
+
+async function authFetch(path, body) {
+  const res = await fetch(SUPABASE_URL + "/auth/v1/" + path, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  return { ok: res.ok, data };
+}
+
+async function ensureProfile(name) {
+  if (!authAccessToken || !authUserId) return;
+  const existing = await fetch(SUPABASE_URL + "/rest/v1/rideglobal_profiles?id=eq." + authUserId, {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + authAccessToken }
+  }).then(r => r.json());
+  if (Array.isArray(existing) && existing.length > 0) return;
+  await fetch(SUPABASE_URL + "/rest/v1/rideglobal_profiles", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + authAccessToken,
+      "Content-Type": "application/json", "Prefer": "return=representation"
+    },
+    body: JSON.stringify({ id: authUserId, display_name: name })
+  });
+}
+
+const authMsgEl = document.getElementById('authMsg');
+function showAuthMsg(text) { authMsgEl.textContent = text; }
+
+document.getElementById('authSignUpBtn').addEventListener('click', async () => {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || password.length < 6) { showAuthMsg("Enter an email and a password of at least 6 characters."); return; }
+  showAuthMsg("Signing up...");
+  const { ok, data } = await authFetch("signup", { email, password });
+  if (!ok) { showAuthMsg(data.msg || data.error_description || "Sign up failed."); return; }
+  if (data.access_token) {
+    authAccessToken = data.access_token;
+    authUserId = data.user ? data.user.id : data.id;
+    await ensureProfile(email.split('@')[0]);
+    document.getElementById('authOverlay').style.display = 'none';
+    document.getElementById('vehicleSelect').style.display = 'flex';
+  } else {
+    showAuthMsg("Account created! Check your email to confirm, then log in.");
+  }
+});
+
+document.getElementById('authLogInBtn').addEventListener('click', async () => {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) { showAuthMsg("Enter your email and password."); return; }
+  showAuthMsg("Logging in...");
+  const { ok, data } = await authFetch("token?grant_type=password", { email, password });
+  if (!ok) { showAuthMsg(data.msg || data.error_description || "Log in failed."); return; }
+  authAccessToken = data.access_token;
+  authUserId = data.user ? data.user.id : null;
+  await ensureProfile(email.split('@')[0]);
+  document.getElementById('authOverlay').style.display = 'none';
+  document.getElementById('vehicleSelect').style.display = 'flex';
+});
+
+document.getElementById('authGuestBtn').addEventListener('click', () => {
+  document.getElementById('authOverlay').style.display = 'none';
+  document.getElementById('vehicleSelect').style.display = 'flex';
+});
+
 async function submitScore(timeMs, trickScore) {
-  const stored = localStorage.getItem("rideglobal_name");
-  const name = prompt("Finish! Enter your rider name for the global leaderboard:", stored || "Rider");
-  if (!name) return;
-  localStorage.setItem("rideglobal_name", name);
   try {
-    const playerId = await findOrCreatePlayer(name);
-    await sbFetch("rideglobal_runs", {
-      method: "POST",
-      body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1-" + vehicleType, time_ms: Math.round(timeMs), trick_score: trickScore })
-    });
+    if (authAccessToken && authUserId) {
+      await fetch(SUPABASE_URL + "/rest/v1/rideglobal_runs", {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + authAccessToken,
+          "Content-Type": "application/json", "Prefer": "return=representation"
+        },
+        body: JSON.stringify({ user_id: authUserId, track_id: "prototype-track-1-" + vehicleType, time_ms: Math.round(timeMs), trick_score: trickScore })
+      });
+    } else {
+      const stored = localStorage.getItem("rideglobal_name");
+      const name = prompt("Finish! Enter your rider name for the global leaderboard:", stored || "Rider");
+      if (!name) return;
+      localStorage.setItem("rideglobal_name", name);
+      const playerId = await findOrCreatePlayer(name);
+      await sbFetch("rideglobal_runs", {
+        method: "POST",
+        body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1-" + vehicleType, time_ms: Math.round(timeMs), trick_score: trickScore })
+      });
+    }
     loadLeaderboard();
   } catch (e) {
     console.error("Score submit failed", e);
