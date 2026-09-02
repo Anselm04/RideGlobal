@@ -9,9 +9,20 @@
   #hud {
     position: absolute; top: 12px; left: 12px; color: #fff;
     background: rgba(0,0,0,0.4); padding: 10px 14px; border-radius: 8px;
-    font-size: 14px; line-height: 1.4; z-index: 10;
+    font-size: 14px; line-height: 1.4; z-index: 10; min-width: 220px;
   }
   #hud b { color: #4fd1ff; }
+  #leaderboard {
+    position: absolute; top: 12px; right: 12px; color: #fff;
+    background: rgba(0,0,0,0.5); padding: 10px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.5; z-index: 10; min-width: 200px;
+  }
+  #leaderboard h3 { margin: 0 0 6px; color: #ffcc00; font-size: 14px; }
+  #finishOverlay {
+    position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85); color: #fff; padding: 20px 28px; border-radius: 12px;
+    font-size: 18px; z-index: 20; display: none; text-align: center;
+  }
   canvas { display: block; }
 </style>
 </head>
@@ -21,9 +32,72 @@
   <div>Move: W A S D or Arrow keys</div>
   <div>Jump: Space</div>
   <div id="speed">Speed: 0</div>
+  <div id="timer">Time: 0.0s</div>
 </div>
+<div id="leaderboard">
+  <h3>Global Leaderboard</h3>
+  <div id="lbList">Loading...</div>
+</div>
+<div id="finishOverlay"></div>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <script>
+// --- Supabase config (RideGlobal prototype leaderboard) ---
+const SUPABASE_URL = "https://frqhtntzwwzcrcyewtxi.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZycWh0bnR6d3d6Y3JjeWV3dHhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NjI1OTUsImV4cCI6MjEwMTIzODU5NX0.6zu-nlAg_2taH58z2TlXe7tDP3Uoartlrt6Il-sdtEc";
+
+async function sbFetch(path, options = {}) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/" + path, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "return=representation",
+      ...(options.headers || {})
+    }
+  });
+  return res.json();
+}
+
+async function loadLeaderboard() {
+  try {
+    const rows = await sbFetch(
+      "rideglobal_runs?select=time_ms,track_id,rideglobal_players(display_name)&order=time_ms.asc&limit=10"
+    );
+    const list = document.getElementById('lbList');
+    if (!Array.isArray(rows) || rows.length === 0) {
+      list.innerHTML = "No runs yet — be the first!";
+      return;
+    }
+    list.innerHTML = rows.map((r, i) => {
+      const name = (r.rideglobal_players && r.rideglobal_players.display_name) || "Anonymous";
+      return (i + 1) + ". " + name + " — " + (r.time_ms / 1000).toFixed(2) + "s";
+    }).join("<br/>");
+  } catch (e) {
+    document.getElementById('lbList').innerHTML = "Leaderboard unavailable";
+  }
+}
+loadLeaderboard();
+
+async function submitScore(timeMs) {
+  const name = prompt("Finish! Enter your rider name for the global leaderboard:", "Rider");
+  if (!name) return;
+  try {
+    const player = await sbFetch("rideglobal_players", {
+      method: "POST",
+      body: JSON.stringify({ display_name: name })
+    });
+    const playerId = Array.isArray(player) && player[0] ? player[0].id : null;
+    await sbFetch("rideglobal_runs", {
+      method: "POST",
+      body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1", time_ms: Math.round(timeMs) })
+    });
+    loadLeaderboard();
+  } catch (e) {
+    console.error("Score submit failed", e);
+  }
+}
+
 // --- Basic scene setup ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
@@ -58,19 +132,26 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Simple track markers (checkpoints) so there's a sense of a race line
+// Checkpoints + finish line
+const NUM_CHECKPOINTS = 10;
+const CHECKPOINT_SPACING = 18;
+const START_Z = 10;
 const checkpointGeo = new THREE.TorusGeometry(2.2, 0.15, 8, 24);
 const checkpointMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0x442200 });
+const finishMat = new THREE.MeshStandardMaterial({ color: 0x33ff66, emissive: 0x114422 });
 const checkpoints = [];
-for (let i = 0; i < 10; i++) {
-  const cp = new THREE.Mesh(checkpointGeo, checkpointMat);
-  cp.position.set(0, 2.2, -i * 18 - 15);
+let finishZ = 0;
+for (let i = 0; i < NUM_CHECKPOINTS; i++) {
+  const isFinish = i === NUM_CHECKPOINTS - 1;
+  const cp = new THREE.Mesh(checkpointGeo, isFinish ? finishMat : checkpointMat);
+  const z = -i * CHECKPOINT_SPACING - 15;
+  cp.position.set(0, 2.2, z);
   cp.rotation.y = Math.PI / 2;
   scene.add(cp);
-  checkpoints.push(cp);
+  checkpoints.push({ mesh: cp, z, isFinish });
+  if (isFinish) finishZ = z;
 }
 
-// A few ramps as simple obstacles
 function addRamp(z) {
   const rampGeo = new THREE.BoxGeometry(6, 0.6, 6);
   const rampMat = new THREE.MeshStandardMaterial({ color: 0x8899aa });
@@ -83,7 +164,7 @@ function addRamp(z) {
 }
 for (let i = 0; i < 6; i++) addRamp(-30 - i * 25);
 
-// --- Rider (placeholder box on wheels — stand-in for BMX rider model) ---
+// --- Rider ---
 const rider = new THREE.Group();
 const bodyGeo = new THREE.BoxGeometry(1, 1.2, 2.2);
 const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d });
@@ -101,73 +182,75 @@ const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
   wheel.castShadow = true;
   rider.add(wheel);
 });
-rider.position.set(0, 0, 10);
+rider.position.set(0, 0, START_Z);
 scene.add(rider);
 
-// --- Physics-lite movement state ---
+// --- Movement state ---
 const state = {
-  velocityZ: 0,
-  velocityX: 0,
-  velocityY: 0,
-  onGround: true,
-  yaw: 0
+  velocityZ: 0, velocityY: 0, onGround: true, yaw: 0,
+  raceStarted: false, raceFinished: false, startTime: 0
 };
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-const ACCEL = 22;
-const MAX_SPEED = 26;
-const TURN_SPEED = 2.4;
-const GRAVITY = -30;
-const JUMP_FORCE = 11;
-const FRICTION = 0.985;
-
+const ACCEL = 22, MAX_SPEED = 26, TURN_SPEED = 2.4, GRAVITY = -30, JUMP_FORCE = 11, FRICTION = 0.985;
 const clock = new THREE.Clock();
 const speedEl = document.getElementById('speed');
+const timerEl = document.getElementById('timer');
+const finishOverlay = document.getElementById('finishOverlay');
 
 function update(dt) {
   const forward = (keys['w'] || keys['arrowup']) ? 1 : (keys['s'] || keys['arrowdown']) ? -1 : 0;
   const turn = (keys['a'] || keys['arrowleft']) ? 1 : (keys['d'] || keys['arrowright']) ? -1 : 0;
 
-  state.yaw += turn * TURN_SPEED * dt * (state.velocityZ !== 0 ? 1 : 0.4);
-  rider.rotation.y = state.yaw;
+  if (!state.raceFinished) {
+    if (forward !== 0 && !state.raceStarted) {
+      state.raceStarted = true;
+      state.startTime = performance.now();
+    }
+    state.yaw += turn * TURN_SPEED * dt * (state.velocityZ !== 0 ? 1 : 0.4);
+    rider.rotation.y = state.yaw;
 
-  const forwardVec = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
-  const targetSpeed = forward * MAX_SPEED;
-  state.velocityZ += (targetSpeed - state.velocityZ) * Math.min(1, ACCEL * dt / MAX_SPEED);
-  state.velocityZ *= FRICTION;
+    const forwardVec = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+    const targetSpeed = forward * MAX_SPEED;
+    state.velocityZ += (targetSpeed - state.velocityZ) * Math.min(1, ACCEL * dt / MAX_SPEED);
+    state.velocityZ *= FRICTION;
+    rider.position.addScaledVector(forwardVec, -state.velocityZ * dt);
 
-  rider.position.addScaledVector(forwardVec, -state.velocityZ * dt);
+    if (state.onGround && keys[' ']) {
+      state.velocityY = JUMP_FORCE;
+      state.onGround = false;
+    }
+    state.velocityY += GRAVITY * dt;
+    rider.position.y += state.velocityY * dt;
+    if (rider.position.y <= 0) {
+      rider.position.y = 0;
+      state.velocityY = 0;
+      state.onGround = true;
+    }
+    body.rotation.x = !state.onGround ? Math.min(0.5, -state.velocityY * 0.03) : body.rotation.x * 0.8;
 
-  if (state.onGround && keys[' ']) {
-    state.velocityY = JUMP_FORCE;
-    state.onGround = false;
+    if (state.raceStarted && rider.position.z <= finishZ) {
+      state.raceFinished = true;
+      const elapsedMs = performance.now() - state.startTime;
+      finishOverlay.style.display = 'block';
+      finishOverlay.innerHTML = "🏁 Finished in " + (elapsedMs / 1000).toFixed(2) + "s<br/><small>Submitting to global leaderboard...</small>";
+      submitScore(elapsedMs).then(() => {
+        finishOverlay.innerHTML += "<br/><small>Refresh page to race again.</small>";
+      });
+    }
   }
-  state.velocityY += GRAVITY * dt;
-  rider.position.y += state.velocityY * dt;
-  if (rider.position.y <= 0) {
-    rider.position.y = 0;
-    state.velocityY = 0;
-    state.onGround = true;
-  }
 
-  // Simple bob/tilt for trick-ish feedback in the air
-  if (!state.onGround) {
-    body.rotation.x = Math.min(0.5, -state.velocityY * 0.03);
-  } else {
-    body.rotation.x *= 0.8;
-  }
-
-  // Camera follows behind the rider
   const camOffset = new THREE.Vector3(Math.sin(state.yaw) * 8, 4.5, Math.cos(state.yaw) * 8);
   camera.position.lerp(new THREE.Vector3(rider.position.x + camOffset.x, rider.position.y + camOffset.y, rider.position.z + camOffset.z), 0.12);
   camera.lookAt(rider.position.x, rider.position.y + 1.2, rider.position.z);
 
-  // Checkpoint spin for visual feedback
-  checkpoints.forEach(cp => cp.rotation.z += dt * 1.5);
-
+  checkpoints.forEach(cp => cp.mesh.rotation.z += dt * 1.5);
   speedEl.textContent = 'Speed: ' + Math.abs(state.velocityZ).toFixed(1);
+  if (state.raceStarted && !state.raceFinished) {
+    timerEl.textContent = 'Time: ' + ((performance.now() - state.startTime) / 1000).toFixed(1) + 's';
+  }
 }
 
 function animate() {
