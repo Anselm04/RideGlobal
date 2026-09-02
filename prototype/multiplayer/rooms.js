@@ -1,6 +1,6 @@
-export function createRoomClient({ supabaseUrl, accessToken, userId }) {
+export function createRoomClient({ supabaseUrl, publishableKey, accessToken, userId }) {
   const headers = {
-    apikey: accessToken ? undefined : '',
+    apikey: publishableKey,
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
     Prefer: 'return=representation',
@@ -44,15 +44,18 @@ export function createRoomClient({ supabaseUrl, accessToken, userId }) {
       const rooms = await request(`rideglobal_rooms?code=eq.${encodeURIComponent(code)}&limit=1`);
       if (!rooms[0]) throw new Error('Room not found');
       const room = rooms[0];
-      await request('rideglobal_room_members', {
-        method: 'POST',
-        body: JSON.stringify({ room_id: room.id, user_id: userId }),
-      });
+      const members = await request(`rideglobal_room_members?room_id=eq.${room.id}&user_id=eq.${userId}&limit=1`);
+      if (!members[0]) {
+        await request('rideglobal_room_members', {
+          method: 'POST',
+          body: JSON.stringify({ room_id: room.id, user_id: userId }),
+        });
+      }
       return room;
     },
 
     async publishState(roomId, { x, y, z, yaw, vehicleType }) {
-      return request(`rideglobal_player_states?on_conflict=room_id,user_id`, {
+      return request('rideglobal_player_states?on_conflict=room_id,user_id', {
         method: 'POST',
         headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
         body: JSON.stringify({
@@ -70,6 +73,26 @@ export function createRoomClient({ supabaseUrl, accessToken, userId }) {
 
     async getRoomStates(roomId) {
       return request(`rideglobal_player_states?room_id=eq.${roomId}`);
+    },
+
+    watchRoomStates(roomId, onStates, intervalMs = 150) {
+      let active = true;
+      let timer = null;
+      const poll = async () => {
+        if (!active) return;
+        try {
+          const states = await request(`rideglobal_player_states?room_id=eq.${roomId}`);
+          onStates(states.filter((state) => state.user_id !== userId));
+        } catch (error) {
+          console.warn('Room state poll failed', error);
+        }
+        if (active) timer = setTimeout(poll, intervalMs);
+      };
+      poll();
+      return () => {
+        active = false;
+        if (timer) clearTimeout(timer);
+      };
     },
   };
 }
