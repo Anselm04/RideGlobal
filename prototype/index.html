@@ -208,6 +208,28 @@ scene.add(skateGroup);
 const SKATE_ZONE_HALF_DEPTH = 8;
 let inSkateBoost = false;
 
+// Grind rail: offset to one side of the main line, rewards steering onto it
+const RAIL_X = 3.2;
+const RAIL_Z_START = -60;
+const RAIL_Z_END = -110;
+const RAIL_Y = 0.9;
+const railMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.6, roughness: 0.3 });
+const railGeo = new THREE.CylinderGeometry(0.08, 0.08, Math.abs(RAIL_Z_START - RAIL_Z_END), 8);
+const rail = new THREE.Mesh(railGeo, railMat);
+rail.rotation.x = Math.PI / 2;
+rail.position.set(RAIL_X, RAIL_Y, (RAIL_Z_START + RAIL_Z_END) / 2);
+rail.castShadow = true;
+scene.add(rail);
+// Support posts
+for (let i = 0; i <= 4; i++) {
+  const postZ = RAIL_Z_START + (RAIL_Z_END - RAIL_Z_START) * (i / 4);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, RAIL_Y, 6), railMat);
+  post.position.set(RAIL_X, RAIL_Y / 2, postZ);
+  scene.add(post);
+}
+let isGrinding = false;
+let grindScoreTimer = 0;
+
 // --- Rider: low-poly BMX rider + bike stand-in ---
 const rider = new THREE.Group();
 
@@ -320,6 +342,29 @@ function update(dt) {
       popTrickText("VERT AIR!");
     }
     if (distToSkate > SKATE_ZONE_HALF_DEPTH + 4) inSkateBoost = false;
+
+    // Grind rail: snap onto the rail when close, in air, and moving fast enough
+    const withinRailZ = rider.position.z <= RAIL_Z_START && rider.position.z >= RAIL_Z_END;
+    const nearRailX = Math.abs(rider.position.x - RAIL_X) < 0.6;
+    const nearRailY = rider.position.y > RAIL_Y - 0.7 && rider.position.y < RAIL_Y + 1.4;
+    if (!state.onGround && withinRailZ && nearRailX && nearRailY && Math.abs(state.velocityZ) > 6) {
+      if (!isGrinding) {
+        isGrinding = true;
+        grindScoreTimer = 0;
+        popTrickText("GRINDING!");
+      }
+      rider.position.y = RAIL_Y + 0.55;
+      rider.position.x += (RAIL_X - rider.position.x) * 0.2;
+      state.velocityY = 0;
+      grindScoreTimer += dt;
+      if (grindScoreTimer >= 0.5) {
+        grindScoreTimer -= 0.5;
+        state.trickScore += 50;
+        trickScoreEl.textContent = 'Trick score: ' + state.trickScore;
+      }
+    } else if (isGrinding) {
+      isGrinding = false;
+    }
 
     if (!state.onGround) {
       if (spinInput !== 0) {
