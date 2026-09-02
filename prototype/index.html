@@ -46,6 +46,28 @@
   <div id="lbList">Loading...</div>
 </div>
 <div id="finishOverlay"></div>
+<div id="touchControls" style="position:absolute; bottom:16px; left:0; right:0; display:flex; justify-content:space-between; padding:0 16px; z-index:12; user-select:none; -webkit-user-select:none;">
+  <div style="display:flex; gap:8px;">
+    <button data-key="a" class="tbtn">&#8592;</button>
+    <button data-key="s" class="tbtn">&#8595;</button>
+    <button data-key="w" class="tbtn">&#8593;</button>
+    <button data-key="d" class="tbtn">&#8594;</button>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button data-key="q" class="tbtn">Q</button>
+    <button data-key=" " class="tbtn" style="width:64px;">JUMP</button>
+    <button data-key="e" class="tbtn">E</button>
+  </div>
+</div>
+<style>
+  .tbtn {
+    width: 48px; height: 48px; border-radius: 10px; border: none;
+    background: rgba(255,255,255,0.25); color: #fff; font-size: 18px; font-weight: bold;
+    touch-action: none;
+  }
+  .tbtn:active { background: rgba(255,255,255,0.5); }
+  @media (min-width: 900px) { #touchControls { display: none; } }
+</style>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <script>
 // --- Supabase config (RideGlobal prototype leaderboard) ---
@@ -174,9 +196,11 @@ function addRamp(z) {
   const rampGeo = new THREE.BoxGeometry(6, 0.6, 6);
   const rampMat = new THREE.MeshStandardMaterial({ color: 0x8899aa });
   const ramp = new THREE.Mesh(rampGeo, rampMat);
-  const x = (Math.random() - 0.5) * 4;
-  ramp.position.set(x, 0.3, z);
-  ramp.rotation.x = -0.35;
+  const x = (Math.random() - 0.5) * 6; // randomized per load for replay variety
+  const tilt = -0.28 - Math.random() * 0.18;
+  ramp.position.set(x, 0.3, z + (Math.random() - 0.5) * 6);
+  ramp.rotation.x = tilt;
+  ramp.rotation.y = (Math.random() - 0.5) * 0.3;
   ramp.castShadow = true;
   ramp.receiveShadow = true;
   scene.add(ramp);
@@ -288,6 +312,19 @@ const state = {
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// Mobile touch controls: map on-screen buttons to the same keys{} state
+document.querySelectorAll('.tbtn').forEach(btn => {
+  const k = btn.getAttribute('data-key');
+  const setDown = ev => { ev.preventDefault(); keys[k] = true; };
+  const setUp = ev => { ev.preventDefault(); keys[k] = false; };
+  btn.addEventListener('touchstart', setDown, { passive: false });
+  btn.addEventListener('touchend', setUp, { passive: false });
+  btn.addEventListener('touchcancel', setUp, { passive: false });
+  btn.addEventListener('mousedown', setDown);
+  btn.addEventListener('mouseup', setUp);
+  btn.addEventListener('mouseleave', setUp);
+});
 
 const ACCEL = 22, MAX_SPEED = 26, TURN_SPEED = 2.4, GRAVITY = -30, JUMP_FORCE = 11, FRICTION = 0.985;
 const SPIN_RATE = 6.5; // radians/sec while holding Q/E in air
