@@ -184,6 +184,30 @@ function addRamp(z) {
 }
 for (let i = 0; i < 6; i++) addRamp(-30 - i * 25);
 
+// --- Skate zone: a quarter-pipe transition proving the "multi-discipline world" idea ---
+const SKATE_ZONE_Z = -195; // placed just before the finish line
+const skateGroup = new THREE.Group();
+const qpMat = new THREE.MeshStandardMaterial({ color: 0xff8800 });
+const qpGeo = new THREE.CylinderGeometry(6, 6, 10, 24, 1, false, 0, Math.PI / 2);
+const quarterPipe = new THREE.Mesh(qpGeo, qpMat);
+quarterPipe.rotation.z = Math.PI / 2;
+quarterPipe.rotation.y = Math.PI / 2;
+quarterPipe.position.set(0, 0, SKATE_ZONE_Z);
+quarterPipe.castShadow = true;
+quarterPipe.receiveShadow = true;
+skateGroup.add(quarterPipe);
+
+const skateFloorGeo = new THREE.PlaneGeometry(16, 20);
+const skateFloorMat = new THREE.MeshStandardMaterial({ color: 0x554433 });
+const skateFloor = new THREE.Mesh(skateFloorGeo, skateFloorMat);
+skateFloor.rotation.x = -Math.PI / 2;
+skateFloor.position.set(0, 0.01, SKATE_ZONE_Z);
+skateFloor.receiveShadow = true;
+skateGroup.add(skateFloor);
+scene.add(skateGroup);
+const SKATE_ZONE_HALF_DEPTH = 8;
+let inSkateBoost = false;
+
 // --- Rider: low-poly BMX rider + bike stand-in ---
 const rider = new THREE.Group();
 
@@ -285,6 +309,17 @@ function update(dt) {
     }
     state.velocityY += GRAVITY * dt;
     rider.position.y += state.velocityY * dt;
+
+    // Skate zone: riding into the quarter-pipe while on ground launches you into a vert air
+    const distToSkate = Math.abs(rider.position.z - SKATE_ZONE_Z);
+    if (state.onGround && distToSkate < SKATE_ZONE_HALF_DEPTH && Math.abs(state.velocityZ) > 8 && !inSkateBoost) {
+      inSkateBoost = true;
+      state.velocityY = JUMP_FORCE * 1.6;
+      state.onGround = false;
+      state.spinAccum = 0;
+      popTrickText("VERT AIR!");
+    }
+    if (distToSkate > SKATE_ZONE_HALF_DEPTH + 4) inSkateBoost = false;
 
     if (!state.onGround) {
       if (spinInput !== 0) {
