@@ -46,6 +46,21 @@
   <div id="lbList">Loading...</div>
 </div>
 <div id="finishOverlay"></div>
+<div id="vehicleSelect" style="position:absolute; inset:0; background:rgba(5,10,20,0.9); z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center;">
+  <h1 style="margin-bottom:6px;">RideGlobal</h1>
+  <p style="opacity:0.8; margin-bottom:24px;">Pick your ride to prove the multi-discipline world</p>
+  <div style="display:flex; gap:16px;">
+    <button class="vbtn" data-vehicle="bmx">🚲<br/>BMX</button>
+    <button class="vbtn" data-vehicle="skate">🛹<br/>Skateboard</button>
+  </div>
+</div>
+<style>
+  .vbtn {
+    width: 140px; height: 100px; border-radius: 12px; border: 2px solid #4fd1ff;
+    background: rgba(255,255,255,0.08); color: #fff; font-size: 16px; cursor: pointer;
+  }
+  .vbtn:hover { background: rgba(79,209,255,0.25); }
+</style>
 <div id="touchControls" style="position:absolute; bottom:16px; left:0; right:0; display:flex; justify-content:space-between; padding:0 16px; z-index:12; user-select:none; -webkit-user-select:none;">
   <div style="display:flex; gap:8px;">
     <button data-key="a" class="tbtn">&#8592;</button>
@@ -129,7 +144,7 @@ async function submitScore(timeMs, trickScore) {
     const playerId = await findOrCreatePlayer(name);
     await sbFetch("rideglobal_runs", {
       method: "POST",
-      body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1", time_ms: Math.round(timeMs), trick_score: trickScore })
+      body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1-" + vehicleType, time_ms: Math.round(timeMs), trick_score: trickScore })
     });
     loadLeaderboard();
   } catch (e) {
@@ -254,54 +269,110 @@ for (let i = 0; i <= 4; i++) {
 let isGrinding = false;
 let grindScoreTimer = 0;
 
-// --- Rider: low-poly BMX rider + bike stand-in ---
-const rider = new THREE.Group();
+// --- Vehicle A: low-poly BMX rider + bike stand-in ---
+const bmxRider = new THREE.Group();
 
 const frameMat = new THREE.MeshStandardMaterial({ color: 0x2266ee });
 const mainFrame = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.9), frameMat);
 mainFrame.position.set(0, 0.55, 0);
 mainFrame.castShadow = true;
-rider.add(mainFrame);
+bmxRider.add(mainFrame);
 
 const diagFrame = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.1), frameMat);
 diagFrame.position.set(0, 0.78, -0.35);
 diagFrame.rotation.x = 0.9;
 diagFrame.castShadow = true;
-rider.add(diagFrame);
+bmxRider.add(diagFrame);
 
 const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.1), new THREE.MeshStandardMaterial({ color: 0x111111 }));
 handlebar.position.set(0, 1.05, 0.85);
-rider.add(handlebar);
+bmxRider.add(handlebar);
 
-const bodyGeo = new THREE.BoxGeometry(0.9, 1.1, 0.7);
-const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d });
-const body = new THREE.Mesh(bodyGeo, bodyMat);
-body.position.set(0, 1.35, -0.1);
-body.castShadow = true;
-rider.add(body);
+const bmxBodyGeo = new THREE.BoxGeometry(0.9, 1.1, 0.7);
+const bmxBodyMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d });
+const bmxBody = new THREE.Mesh(bmxBodyGeo, bmxBodyMat);
+bmxBody.position.set(0, 1.35, -0.1);
+bmxBody.castShadow = true;
+bmxRider.add(bmxBody);
 
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffcc99 }));
-head.position.set(0, 2.05, -0.05);
-head.castShadow = true;
-rider.add(head);
+const bmxHead = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffcc99 }));
+bmxHead.position.set(0, 2.05, -0.05);
+bmxHead.castShadow = true;
+bmxRider.add(bmxHead);
 
-const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.12, 20);
-const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-const hubMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+const bikeWheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.12, 20);
+const bikeWheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+const bikeHubMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
 [[0, 0.5, 0.95], [0, 0.5, -0.95]].forEach(([x, y, z]) => {
-  const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+  const wheel = new THREE.Mesh(bikeWheelGeo, bikeWheelMat);
   wheel.rotation.z = Math.PI / 2;
   wheel.position.set(x, y, z);
   wheel.castShadow = true;
-  rider.add(wheel);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), hubMat);
+  bmxRider.add(wheel);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), bikeHubMat);
   hub.rotation.z = Math.PI / 2;
   hub.position.set(x, y, z);
-  rider.add(hub);
+  bmxRider.add(hub);
 });
 
+// --- Vehicle B: low-poly skateboard rider + deck stand-in ---
+const skateRider = new THREE.Group();
+
+const deckMat = new THREE.MeshStandardMaterial({ color: 0x996633 });
+const deck = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 1.6), deckMat);
+deck.position.set(0, 0.25, 0);
+deck.castShadow = true;
+skateRider.add(deck);
+
+const truckMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+const skateWheelGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.1, 16);
+const skateWheelMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+[[0.2, 0.15, 0.55], [-0.2, 0.15, 0.55], [0.2, 0.15, -0.55], [-0.2, 0.15, -0.55]].forEach(([x, y, z]) => {
+  const w = new THREE.Mesh(skateWheelGeo, skateWheelMat);
+  w.rotation.z = Math.PI / 2;
+  w.position.set(x, y, z);
+  w.castShadow = true;
+  skateRider.add(w);
+});
+
+const skateBodyGeo = new THREE.BoxGeometry(0.7, 1.0, 0.4);
+const skateBodyMat = new THREE.MeshStandardMaterial({ color: 0x33cc99 });
+const skateBody = new THREE.Mesh(skateBodyGeo, skateBodyMat);
+skateBody.position.set(0, 0.95, 0);
+skateBody.castShadow = true;
+skateRider.add(skateBody);
+
+const skateHead = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffcc99 }));
+skateHead.position.set(0, 1.6, 0);
+skateHead.castShadow = true;
+skateRider.add(skateHead);
+
+// --- Vehicle config + selection ---
+const VEHICLES = {
+  bmx: { model: bmxRider, body: bmxBody, ACCEL: 22, MAX_SPEED: 26, JUMP_FORCE: 11, bodyRestY: 1.35 },
+  skate: { model: skateRider, body: skateBody, ACCEL: 16, MAX_SPEED: 20, JUMP_FORCE: 9, bodyRestY: 0.95 }
+};
+let vehicleType = 'bmx';
+let vehicle = VEHICLES.bmx;
+let body = vehicle.body;
+
+const rider = new THREE.Group();
+rider.add(bmxRider);
+rider.add(skateRider);
+skateRider.visible = false;
 rider.position.set(0, 0, START_Z);
 scene.add(rider);
+
+document.querySelectorAll('.vbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    vehicleType = btn.getAttribute('data-vehicle');
+    vehicle = VEHICLES[vehicleType];
+    body = vehicle.body;
+    bmxRider.visible = vehicleType === 'bmx';
+    skateRider.visible = vehicleType === 'skate';
+    document.getElementById('vehicleSelect').style.display = 'none';
+  });
+});
 
 // --- Movement + trick state ---
 const state = {
@@ -326,7 +397,7 @@ document.querySelectorAll('.tbtn').forEach(btn => {
   btn.addEventListener('mouseleave', setUp);
 });
 
-const ACCEL = 22, MAX_SPEED = 26, TURN_SPEED = 2.4, GRAVITY = -30, JUMP_FORCE = 11, FRICTION = 0.985;
+const TURN_SPEED = 2.4, GRAVITY = -30, FRICTION = 0.985; // ACCEL/MAX_SPEED/JUMP_FORCE now come from the selected vehicle
 const SPIN_RATE = 6.5; // radians/sec while holding Q/E in air
 const clock = new THREE.Clock();
 const speedEl = document.getElementById('speed');
@@ -355,14 +426,14 @@ function update(dt) {
     state.yaw += turn * TURN_SPEED * dt * (state.velocityZ !== 0 ? 1 : 0.4);
 
     const forwardVec = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
-    const targetSpeed = forward * MAX_SPEED;
-    state.velocityZ += (targetSpeed - state.velocityZ) * Math.min(1, ACCEL * dt / MAX_SPEED);
+    const targetSpeed = forward * vehicle.MAX_SPEED;
+    state.velocityZ += (targetSpeed - state.velocityZ) * Math.min(1, vehicle.ACCEL * dt / vehicle.MAX_SPEED);
     state.velocityZ *= FRICTION;
     rider.position.addScaledVector(forwardVec, -state.velocityZ * dt);
 
     const wasOnGround = state.onGround;
     if (state.onGround && keys[' ']) {
-      state.velocityY = JUMP_FORCE;
+      state.velocityY = vehicle.JUMP_FORCE;
       state.onGround = false;
       state.spinAccum = 0;
     }
@@ -373,7 +444,7 @@ function update(dt) {
     const distToSkate = Math.abs(rider.position.z - SKATE_ZONE_Z);
     if (state.onGround && distToSkate < SKATE_ZONE_HALF_DEPTH && Math.abs(state.velocityZ) > 8 && !inSkateBoost) {
       inSkateBoost = true;
-      state.velocityY = JUMP_FORCE * 1.6;
+      state.velocityY = vehicle.JUMP_FORCE * 1.6;
       state.onGround = false;
       state.spinAccum = 0;
       popTrickText("VERT AIR!");
