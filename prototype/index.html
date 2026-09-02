@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>RideGlobal - Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background:#0a0a12; font-family: sans-serif; }
+  #hud {
+    position: absolute; top: 12px; left: 12px; color: #fff;
+    background: rgba(0,0,0,0.4); padding: 10px 14px; border-radius: 8px;
+    font-size: 14px; line-height: 1.4; z-index: 10;
+  }
+  #hud b { color: #4fd1ff; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div><b>RideGlobal</b> — vertical slice prototype</div>
+  <div>Move: W A S D or Arrow keys</div>
+  <div>Jump: Space</div>
+  <div id="speed">Speed: 0</div>
+</div>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script>
+// --- Basic scene setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 30, 140);
+
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 500);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- Lighting ---
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.1);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(40, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+
+// --- Ground / track ---
+const groundGeo = new THREE.PlaneGeometry(400, 400);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a5f3a });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Simple track markers (checkpoints) so there's a sense of a race line
+const checkpointGeo = new THREE.TorusGeometry(2.2, 0.15, 8, 24);
+const checkpointMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0x442200 });
+const checkpoints = [];
+for (let i = 0; i < 10; i++) {
+  const cp = new THREE.Mesh(checkpointGeo, checkpointMat);
+  cp.position.set(0, 2.2, -i * 18 - 15);
+  cp.rotation.y = Math.PI / 2;
+  scene.add(cp);
+  checkpoints.push(cp);
+}
+
+// A few ramps as simple obstacles
+function addRamp(z) {
+  const rampGeo = new THREE.BoxGeometry(6, 0.6, 6);
+  const rampMat = new THREE.MeshStandardMaterial({ color: 0x8899aa });
+  const ramp = new THREE.Mesh(rampGeo, rampMat);
+  ramp.position.set((Math.random() - 0.5) * 4, 0.3, z);
+  ramp.rotation.x = -0.35;
+  ramp.castShadow = true;
+  ramp.receiveShadow = true;
+  scene.add(ramp);
+}
+for (let i = 0; i < 6; i++) addRamp(-30 - i * 25);
+
+// --- Rider (placeholder box on wheels — stand-in for BMX rider model) ---
+const rider = new THREE.Group();
+const bodyGeo = new THREE.BoxGeometry(1, 1.2, 2.2);
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d });
+const body = new THREE.Mesh(bodyGeo, bodyMat);
+body.position.y = 0.9;
+body.castShadow = true;
+rider.add(body);
+
+const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 16);
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+[[-0.6, 0.5, 1], [0.6, 0.5, 1], [-0.6, 0.5, -1], [0.6, 0.5, -1]].forEach(([x, y, z]) => {
+  const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+  wheel.rotation.z = Math.PI / 2;
+  wheel.position.set(x, y, z);
+  wheel.castShadow = true;
+  rider.add(wheel);
+});
+rider.position.set(0, 0, 10);
+scene.add(rider);
+
+// --- Physics-lite movement state ---
+const state = {
+  velocityZ: 0,
+  velocityX: 0,
+  velocityY: 0,
+  onGround: true,
+  yaw: 0
+};
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+const ACCEL = 22;
+const MAX_SPEED = 26;
+const TURN_SPEED = 2.4;
+const GRAVITY = -30;
+const JUMP_FORCE = 11;
+const FRICTION = 0.985;
+
+const clock = new THREE.Clock();
+const speedEl = document.getElementById('speed');
+
+function update(dt) {
+  const forward = (keys['w'] || keys['arrowup']) ? 1 : (keys['s'] || keys['arrowdown']) ? -1 : 0;
+  const turn = (keys['a'] || keys['arrowleft']) ? 1 : (keys['d'] || keys['arrowright']) ? -1 : 0;
+
+  state.yaw += turn * TURN_SPEED * dt * (state.velocityZ !== 0 ? 1 : 0.4);
+  rider.rotation.y = state.yaw;
+
+  const forwardVec = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+  const targetSpeed = forward * MAX_SPEED;
+  state.velocityZ += (targetSpeed - state.velocityZ) * Math.min(1, ACCEL * dt / MAX_SPEED);
+  state.velocityZ *= FRICTION;
+
+  rider.position.addScaledVector(forwardVec, -state.velocityZ * dt);
+
+  if (state.onGround && keys[' ']) {
+    state.velocityY = JUMP_FORCE;
+    state.onGround = false;
+  }
+  state.velocityY += GRAVITY * dt;
+  rider.position.y += state.velocityY * dt;
+  if (rider.position.y <= 0) {
+    rider.position.y = 0;
+    state.velocityY = 0;
+    state.onGround = true;
+  }
+
+  // Simple bob/tilt for trick-ish feedback in the air
+  if (!state.onGround) {
+    body.rotation.x = Math.min(0.5, -state.velocityY * 0.03);
+  } else {
+    body.rotation.x *= 0.8;
+  }
+
+  // Camera follows behind the rider
+  const camOffset = new THREE.Vector3(Math.sin(state.yaw) * 8, 4.5, Math.cos(state.yaw) * 8);
+  camera.position.lerp(new THREE.Vector3(rider.position.x + camOffset.x, rider.position.y + camOffset.y, rider.position.z + camOffset.z), 0.12);
+  camera.lookAt(rider.position.x, rider.position.y + 1.2, rider.position.z);
+
+  // Checkpoint spin for visual feedback
+  checkpoints.forEach(cp => cp.rotation.z += dt * 1.5);
+
+  speedEl.textContent = 'Speed: ' + Math.abs(state.velocityZ).toFixed(1);
+}
+
+function animate() {
+  const dt = Math.min(0.05, clock.getDelta());
+  update(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>
