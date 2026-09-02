@@ -86,15 +86,25 @@ async function loadLeaderboard() {
 }
 loadLeaderboard();
 
+async function findOrCreatePlayer(name) {
+  const existing = await sbFetch("rideglobal_players?display_name=eq." + encodeURIComponent(name) + "&limit=1");
+  if (Array.isArray(existing) && existing.length > 0) {
+    return existing[0].id;
+  }
+  const created = await sbFetch("rideglobal_players", {
+    method: "POST",
+    body: JSON.stringify({ display_name: name })
+  });
+  return Array.isArray(created) && created[0] ? created[0].id : null;
+}
+
 async function submitScore(timeMs, trickScore) {
-  const name = prompt("Finish! Enter your rider name for the global leaderboard:", "Rider");
+  const stored = localStorage.getItem("rideglobal_name");
+  const name = prompt("Finish! Enter your rider name for the global leaderboard:", stored || "Rider");
   if (!name) return;
+  localStorage.setItem("rideglobal_name", name);
   try {
-    const player = await sbFetch("rideglobal_players", {
-      method: "POST",
-      body: JSON.stringify({ display_name: name })
-    });
-    const playerId = Array.isArray(player) && player[0] ? player[0].id : null;
+    const playerId = await findOrCreatePlayer(name);
     await sbFetch("rideglobal_runs", {
       method: "POST",
       body: JSON.stringify({ player_id: playerId, track_id: "prototype-track-1", time_ms: Math.round(timeMs), trick_score: trickScore })
@@ -174,24 +184,52 @@ function addRamp(z) {
 }
 for (let i = 0; i < 6; i++) addRamp(-30 - i * 25);
 
-// --- Rider ---
+// --- Rider: low-poly BMX rider + bike stand-in ---
 const rider = new THREE.Group();
-const bodyGeo = new THREE.BoxGeometry(1, 1.2, 2.2);
+
+const frameMat = new THREE.MeshStandardMaterial({ color: 0x2266ee });
+const mainFrame = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.9), frameMat);
+mainFrame.position.set(0, 0.55, 0);
+mainFrame.castShadow = true;
+rider.add(mainFrame);
+
+const diagFrame = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.1), frameMat);
+diagFrame.position.set(0, 0.78, -0.35);
+diagFrame.rotation.x = 0.9;
+diagFrame.castShadow = true;
+rider.add(diagFrame);
+
+const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.1), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+handlebar.position.set(0, 1.05, 0.85);
+rider.add(handlebar);
+
+const bodyGeo = new THREE.BoxGeometry(0.9, 1.1, 0.7);
 const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d });
 const body = new THREE.Mesh(bodyGeo, bodyMat);
-body.position.y = 0.9;
+body.position.set(0, 1.35, -0.1);
 body.castShadow = true;
 rider.add(body);
 
-const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 16);
-const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-[[-0.6, 0.5, 1], [0.6, 0.5, 1], [-0.6, 0.5, -1], [0.6, 0.5, -1]].forEach(([x, y, z]) => {
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), new THREE.MeshStandardMaterial({ color: 0xffcc99 }));
+head.position.set(0, 2.05, -0.05);
+head.castShadow = true;
+rider.add(head);
+
+const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.12, 20);
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+const hubMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+[[0, 0.5, 0.95], [0, 0.5, -0.95]].forEach(([x, y, z]) => {
   const wheel = new THREE.Mesh(wheelGeo, wheelMat);
   wheel.rotation.z = Math.PI / 2;
   wheel.position.set(x, y, z);
   wheel.castShadow = true;
   rider.add(wheel);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), hubMat);
+  hub.rotation.z = Math.PI / 2;
+  hub.position.set(x, y, z);
+  rider.add(hub);
 });
+
 rider.position.set(0, 0, START_Z);
 scene.add(rider);
 
@@ -249,7 +287,6 @@ function update(dt) {
     rider.position.y += state.velocityY * dt;
 
     if (!state.onGround) {
-      // Mid-air trick: Q/E spins the whole rider body around Y (a "360")
       if (spinInput !== 0) {
         const delta = spinInput * SPIN_RATE * dt;
         body.rotation.y += delta;
